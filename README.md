@@ -1,4 +1,4 @@
-# diffusion-rtc
+# ai-rtc-agent
 
 # Table of Contents
 
@@ -11,7 +11,7 @@
 
 # Overview
 
-diffusion-rtc is an experimental project for real-time video stream generation using diffusion models, hardware accelerated video decoding/encoding via NVDEC/NVENC and WebRTC.
+ai-rtc-agent is an experimental project for real-time video stream processing using AI models, hardware accelerated video decoding/encoding via NVDEC/NVENC and WebRTC.
 
 The project relies on:
 
@@ -86,7 +86,7 @@ python -m streamdiffusion.tools.install-tensorrt
 ## Docker
 
 ```
-docker build -t diffusion-rtc:latest .
+docker build -t ai-rtc-agent:latest .
 ```
 
 # Download Models
@@ -106,7 +106,7 @@ The default directory for CivitAI model files is `./models/civitai` and can be m
 ## Docker
 
 ```
-docker run -v ./models:/models diffusion-rtc:latest python download.py
+docker run -v ./models:/models ai-rtc-agent:latest python download.py
 ```
 
 # Build TensorRT Engines
@@ -122,7 +122,7 @@ The default directory for engine plan files is `./models/engines` and can be mod
 ## Docker
 
 ```
-docker run --gpus all -v ./models:/models diffusion-rtc:latest python build.py
+docker run --gpus all -v ./models:/models ai-rtc-agent:latest python build.py
 ```
 
 # Run
@@ -138,7 +138,7 @@ python agent.py
 ## Docker
 
 ```
-docker run --gpus all --network="host" -v ./models:/models diffusion-rtc:latest
+docker run --gpus all --network="host" -v ./models:/models ai-rtc-agent:latest
 ```
 
 ## WebRTC Connection Issues

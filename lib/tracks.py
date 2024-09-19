@@ -23,5 +23,9 @@ class VideoStreamTrack(MediaStreamTrack):
             self.pipeline(frame)
             self.warmup_frame_idx += 1
 
+        # The decoded frame returned by aiortc will be a torch.Tensor which
+        # is then passed into the pipeline.
+        # The pipeline returns the processed frame as a torch.Tensor which
+        # is then passed to aiortc to be encoded into a frame.
         frame = await self.track.recv()
         return self.pipeline(frame)

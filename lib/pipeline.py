@@ -1,4 +1,3 @@
-import av
 import torch
 import cvcuda
 import numpy as np
@@ -54,7 +53,7 @@ class StreamDiffusionPipeline:
             guidance_scale=DEFAULT_GUIDANCE_SCALE,
         )
 
-    def preprocess(self, frame: av.frame.Frame):
+    def preprocess(self, frame: torch.Tensor):
         # dtype=uint8 -> dtype=float32
         frame = cvcuda.convertto(frame, np.float32, scale=1 / 255)
         # NHWC -> NCHW
@@ -71,7 +70,7 @@ class StreamDiffusionPipeline:
         # dtype=float16 -> dtype=uint8
         return (frame * 255.0).clamp(0, 255).to(dtype=torch.uint8).unsqueeze(0)
 
-    def __call__(self, frame: av.frame.Frame):
+    def __call__(self, frame: torch.Tensor):
         frame = self.preprocess(frame)
         frame = self.predict(frame)
         frame = self.postprocess(frame)

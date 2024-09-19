@@ -4,6 +4,10 @@
 
 ai-rtc-agent is an experimental project for real-time video stream processing using AI models, hardware accelerated video decoding/encoding via NVDEC/NVENC and WebRTC.
 
+The [aifluidsim](https://www.aifluidsim.com/) app accepts a stream URL that is backed by a hosted instance of ai-rtc-agent.
+
+The easiest way to get a stream URL is to follow the steps for [deploying on Runpod](./docs/runpod.md) and [connecting](./docs/connect.md). If you want to run and deploy the agent elsewhere, refer to the Table of Contents below.
+
 The project relies on:
 
 - A fork of [StreamDiffusion](https://github.com/yondonfu/StreamDiffusion/tree/deepstream) with the following changes:

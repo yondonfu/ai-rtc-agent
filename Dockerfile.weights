@@ -1,0 +1,14 @@
+#syntax=docker/dockerfile:1.7-labs
+FROM ai-rtc-agent:latest
+
+WORKDIR /app
+
+COPY models/engines/engines--lykon--dreamshaper-8 /models/engines/engines--lykon--dreamshaper-8
+# Exclude VAE and UNet weights because we are using TensorRT engines for the VAE and UNet
+# We still need the config.json files and the weights for the text_encoder
+COPY --exclude="**/vae/*.safetensors" --exclude="**/unet/*.safetensors" --exclude="**/safety_checker" models/hub/models--lykon--dreamshaper-8 /models/hub/models--lykon--dreamshaper-8
+# Exclude weights because we are using a TensorRT engine for the VAE
+# We still need the config.json files
+COPY --exclude="**/*.bin" --exclude="**/*.safetensors" models/hub/models--madebyollin--taesd /models/hub/models--madebyollin--taesd
+
+CMD ["python", "agent.py"]

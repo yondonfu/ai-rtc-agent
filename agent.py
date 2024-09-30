@@ -4,7 +4,10 @@ import argparse
 import os
 import logging
 import uuid
+import random
+import types
 
+from typing import List, Tuple
 from twilio.rest import Client
 from aiohttp import web
 from aiortc import (
@@ -14,12 +17,55 @@ from aiortc import (
     RTCIceServer,
 )
 from aiortc.rtcrtpsender import RTCRtpSender
+from aiortc.contrib.media import MediaRelay, MediaBlackhole
 
 from lib.pipeline import StreamDiffusionPipeline
 from lib.tracks import VideoStreamTrack
 from lib.events import StreamEventHandler
 
 logger = logging.getLogger(__name__)
+
+
+# Original issue: https://github.com/aiortc/aioice/pull/63
+# Copied from: https://github.com/toverainc/willow-inference-server/pull/17/files
+def patch_loop_datagram(local_ports: List[int]):
+    loop = asyncio.get_event_loop()
+    if getattr(loop, "_patch_done", False):
+        return
+
+    # Monkey patch aiortc to control ephemeral ports
+    old_create_datagram_endpoint = loop.create_datagram_endpoint
+
+    async def create_datagram_endpoint(
+        self, protocol_factory, local_addr: Tuple[str, int] = None, **kwargs
+    ):
+        # if port is specified just use it
+        if local_addr and local_addr[1]:
+            return await old_create_datagram_endpoint(
+                protocol_factory, local_addr=local_addr, **kwargs
+            )
+        if local_addr is None:
+            return await old_create_datagram_endpoint(
+                protocol_factory, local_addr=None, **kwargs
+            )
+        # if port is not specified make it use our range
+        ports = list(local_ports)
+        random.shuffle(ports)
+        for port in ports:
+            try:
+                ret = await old_create_datagram_endpoint(
+                    protocol_factory, local_addr=(local_addr[0], port), **kwargs
+                )
+                logger.debug(f"create_datagram_endpoint chose port {port}")
+                return ret
+            except OSError as exc:
+                if port == ports[-1]:
+                    # this was the last port, give up
+                    raise exc
+        raise ValueError("local_ports must not be empty")
+
+    loop.create_datagram_endpoint = types.MethodType(create_datagram_endpoint, loop)
+    loop._patch_done = True
 
 
 def force_codec(pc, sender, forced_codec):
@@ -60,6 +106,17 @@ def get_ice_servers():
                 ice_servers.append(turn)
 
     return ice_servers
+
+
+# Create Link headers for a list of ICE servers to be used for a WHIP endpoint
+def get_link_headers(ice_servers: List[RTCIceServer]) -> List[str]:
+    links = []
+    for srv in ice_servers:
+        url = srv.urls[0]
+        link = f'<{url}>; rel="ice-server"; username="{srv.username}"; credential="{srv.credential}";'
+        links.append(link)
+
+    return links
 
 
 async def offer(request):
@@ -143,14 +200,141 @@ async def offer(request):
     )
 
 
+async def whip(request):
+    if request.content_type != "application/sdp":
+        return web.Response(status=400)
+
+    pipeline = request.app["pipeline"]
+    pcs = request.app["pcs"]
+
+    offer = await request.text()
+
+    offer = RTCSessionDescription(sdp=offer, type="offer")
+
+    # TURN does not work when connecting with OBS because OBS currently does not support trickle ICE meaning it
+    # will not send ICE candidates after the initial SDP exchange during signaling. The TURN workflow requires a client behind a NAT
+    # to send a STUN binding request to the TURN server in order to get its IP:port which can be sent as a candidate to WHIP server so
+    # that it can create a permission with the TURN server for the allocated Relayed Transport Address. Since OBS does not send ICE candidates
+    # after signaling, this permission creation process is not possible.
+    #
+    # In order to avoid using TURN we do two things:
+    #
+    # 1. The WHIP server uses STUN to discover its public IP.
+    # aiortc should automatically use a STUN server if RTCPeerConnection is initialized without a config.
+    # Another option would be to discover the public IP by other means and then modify candidates like what broadcast-box + Pion do:
+    # https://github.com/pion/webrtc/blob/5bf7c9465c794763812e3ec2aaf6d29815a87e27/settingengine.go#L240
+    # https://github.com/Glimesh/broadcast-box/blob/5d538c24077d0c8d13dea3ecb7bd5dd1ed634098/internal/webrtc/webrtc.go#L196
+    #
+    # 2. Force specific UDP media ports that definitely support inbound/oubound traffic instead of using random ephemeral ports
+    # This is done by monkeypatching aioice using patch_loop_datagram
+    pc = RTCPeerConnection()
+    pcs.add(pc)
+
+    # Prefer h264
+    transceiver = pc.addTransceiver("video")
+    caps = RTCRtpSender.getCapabilities("video")
+    prefs = list(filter(lambda x: x.name == "H264", caps.codecs))
+    transceiver.setCodecPreferences(prefs)
+
+    sink = MediaBlackhole()
+
+    @pc.on("datachannel")
+    def on_datachannel(channel):
+        @channel.on("message")
+        async def on_message(message):
+            logger.info(f"received config: {message}")
+            config = json.loads(message)
+
+            t_index_list = config.get("t_index_list", None)
+            if t_index_list is not None:
+                pipeline.update_t_index_list(t_index_list)
+
+            prompt = config.get("prompt", None)
+            if prompt is not None:
+                pipeline.update_prompt(prompt)
+
+    @pc.on("iceconnectionstatechange")
+    async def on_iceconnectionstatechange():
+        logger.info("ICE connection state is %s", pc.iceConnectionState)
+        if pc.iceConnectionState == "failed":
+            await pc.close()
+            pcs.discard(pc)
+
+    @pc.on("track")
+    def on_track(track):
+        logger.info(f"Track received: {track.kind}")
+        if track.kind == "video":
+            videoTrack = VideoStreamTrack(track, pipeline)
+            sink.addTrack(videoTrack)
+
+        @track.on("ended")
+        async def on_ended():
+            logger.info(f"{track.kind} track ended")
+            await sink.stop()
+
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange():
+        logger.info(f"Connection state is: {pc.connectionState}")
+        if pc.connectionState == "failed":
+            await pc.close()
+            pcs.discard(pc)
+        elif pc.connectionState == "closed":
+            await pc.close()
+            pcs.discard(pc)
+
+    await pc.setRemoteDescription(offer)
+    await sink.start()
+
+    # Required to support OBS WHIP
+    # As of OBS 30.2.0-beta4, OBS will NOT gather local ICE candidates before sending a SDP offer via WHIP.
+    # This means that the WHIP endpoint impl *must* gather ICE candidates before responding with its SDP answer
+    # in order to establish a connection.
+    # See this issue for more details: https://github.com/obsproject/obs-studio/issues/10910
+    # aiortc.RTCPeerConnection does not expose __gather() as a public method so as a workaround we
+    # use the class's name-mangled version of the method.
+    await pc._RTCPeerConnection__gather()
+
+    answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+
+    # Link headers based on this example:
+    # https://github.com/Sean-Der/whip-turn-test/blob/master/main.go
+    # We don't use Link headers for now
+    # links = get_link_headers(ice_servers)
+    return web.Response(
+        status=201,
+        content_type="application/sdp",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            # "Link": ",".join(links),
+            "Location": "/whip",
+        },
+        text=answer.sdp,
+    )
+
+
+async def stop_whip(request):
+    # TODO: Close pc
+    return web.Response(status=200)
+
+
 def health(_):
     return web.Response(content_type="application/json", text="OK")
 
 
 async def on_startup(app):
+    if app["udp_port"]:
+        patch_loop_datagram([app["udp_port"]])
+
     app["pipeline"] = StreamDiffusionPipeline(app["model_id"])
     app["pcs"] = set()
     app["stream_event_handler"] = StreamEventHandler()
+
+    app["relay"] = MediaRelay()
+    # aiohttp will emit a deprecation warning for mutating top-level state on the
+    # app object so we store mutable state in an object and update the object instead
+    app["state"] = {"source_track": None}
 
 
 async def on_shutdown(app):
@@ -167,6 +351,9 @@ if __name__ == "__main__":
     )
     parser.add_argument("--port", default=8888, help="Set the port to listen on")
     parser.add_argument(
+        "--udp-port", default=None, help="Set the UDP port to receive WebRTC media on"
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
@@ -177,11 +364,14 @@ if __name__ == "__main__":
     logging.basicConfig(level=args.log_level.upper())
 
     app = web.Application()
+    app["udp_port"] = args.udp_port
     app["model_id"] = args.model_id
 
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
 
+    app.router.add_post("/whip", whip)
+    app.router.add_delete("/whip", stop_whip)
     app.router.add_post("/offer", offer)
     app.router.add_get("/", health)
 

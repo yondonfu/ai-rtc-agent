@@ -13,11 +13,10 @@ from aiohttp import web
 from aiortc import (
     RTCPeerConnection,
     RTCSessionDescription,
-    RTCConfiguration,
     RTCIceServer,
 )
 from aiortc.rtcrtpsender import RTCRtpSender
-from aiortc.contrib.media import MediaRelay, MediaBlackhole
+from aiortc.contrib.media import MediaRelay
 
 from lib.pipeline import StreamDiffusionPipeline
 from lib.tracks import VideoStreamTrack
@@ -132,7 +131,8 @@ async def offer(request):
     offer_params = params["offer"]
     offer = RTCSessionDescription(sdp=offer_params["sdp"], type=offer_params["type"])
 
-    pc = RTCPeerConnection(configuration=RTCConfiguration(iceServers=get_ice_servers()))
+    # pc = RTCPeerConnection(configuration=RTCConfiguration(iceServers=get_ice_servers()))
+    pc = RTCPeerConnection()
     pcs.add(pc)
 
     tracks = {"video": None}
@@ -200,6 +200,81 @@ async def offer(request):
     )
 
 
+async def whep(request):
+    if request.content_type != "application/sdp":
+        return web.Response(status=400)
+
+    source_track = request.app["state"]["source_track"]
+    pcs = request.app["pcs"]
+
+    offer = await request.text()
+
+    offer = RTCSessionDescription(sdp=offer, type="offer")
+
+    pc = RTCPeerConnection()
+    pcs.add(pc)
+
+    @pc.on("iceconnectionstatechange")
+    async def on_iceconnectionstatechange():
+        logger.info("ICE connection state is %s", pc.iceConnectionState)
+        if pc.iceConnectionState == "failed":
+            await pc.close()
+            pcs.discard(pc)
+
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange():
+        logger.info(f"Connection state is: {pc.connectionState}")
+        if pc.connectionState == "failed":
+            await pc.close()
+            pcs.discard(pc)
+        elif pc.connectionState == "closed":
+            await pc.close()
+            pcs.discard(pc)
+
+    # track = relay.subscribe(source_track, buffered=False)
+    sender = pc.addTrack(source_track)
+
+    codec = "video/H264"
+    force_codec(pc, sender, codec)
+
+    await pc.setRemoteDescription(offer)
+
+    # Required to support OBS WHIP
+    # As of OBS 30.2.0-beta4, OBS will NOT gather local ICE candidates before sending a SDP offer via WHIP.
+    # This means that the WHIP endpoint impl *must* gather ICE candidates before responding with its SDP answer
+    # in order to establish a connection.
+    # See this issue for more details: https://github.com/obsproject/obs-studio/issues/10910
+    # aiortc.RTCPeerConnection does not expose __gather() as a public method so as a workaround we
+    # use the class's name-mangled version of the method.
+    await pc._RTCPeerConnection__gather()
+
+    answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+
+    # Link headers based on this example:
+    # https://github.com/Sean-Der/whip-turn-test/blob/master/main.go
+    # We don't use Link headers for now
+    # links = get_link_headers(ice_servers)
+    return web.Response(
+        status=201,
+        content_type="application/sdp",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            # "Link": ",".join(links),
+            "Location": "/whep",
+        },
+        text=answer.sdp,
+    )
+
+
+# TODO: After the peer disconnects we see this error sometimes
+# https://github.com/aiortc/aiortc/issues/1124
+async def stop_whep(request):
+    # TODO: Close pc
+    return web.Response(status=200)
+
+
 async def whip(request):
     if request.content_type != "application/sdp":
         return web.Response(status=400)
@@ -236,8 +311,6 @@ async def whip(request):
     prefs = list(filter(lambda x: x.name == "H264", caps.codecs))
     transceiver.setCodecPreferences(prefs)
 
-    sink = MediaBlackhole()
-
     @pc.on("datachannel")
     def on_datachannel(channel):
         @channel.on("message")
@@ -265,12 +338,11 @@ async def whip(request):
         logger.info(f"Track received: {track.kind}")
         if track.kind == "video":
             videoTrack = VideoStreamTrack(track, pipeline)
-            sink.addTrack(videoTrack)
+            request.app["state"]["source_track"] = videoTrack
 
         @track.on("ended")
         async def on_ended():
             logger.info(f"{track.kind} track ended")
-            await sink.stop()
 
     @pc.on("connectionstatechange")
     async def on_connectionstatechange():
@@ -283,7 +355,6 @@ async def whip(request):
             pcs.discard(pc)
 
     await pc.setRemoteDescription(offer)
-    await sink.start()
 
     # Required to support OBS WHIP
     # As of OBS 30.2.0-beta4, OBS will NOT gather local ICE candidates before sending a SDP offer via WHIP.
@@ -324,8 +395,8 @@ def health(_):
 
 
 async def on_startup(app):
-    if app["udp_port"]:
-        patch_loop_datagram([app["udp_port"]])
+    if app["udp_ports"]:
+        patch_loop_datagram(app["udp_ports"])
 
     app["pipeline"] = StreamDiffusionPipeline(app["model_id"])
     app["pcs"] = set()
@@ -351,7 +422,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--port", default=8888, help="Set the port to listen on")
     parser.add_argument(
-        "--udp-port", default=None, help="Set the UDP port to receive WebRTC media on"
+        "--udp-ports", default=None, help="Set the UDP ports to receive WebRTC media on"
     )
     parser.add_argument(
         "--log-level",
@@ -364,7 +435,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=args.log_level.upper())
 
     app = web.Application()
-    app["udp_port"] = args.udp_port
+    app["udp_ports"] = args.udp_ports.split(",")
     app["model_id"] = args.model_id
 
     app.on_startup.append(on_startup)
@@ -372,6 +443,8 @@ if __name__ == "__main__":
 
     app.router.add_post("/whip", whip)
     app.router.add_delete("/whip", stop_whip)
+    app.router.add_post("/whep", whep)
+    app.router.add_delete("/whep", stop_whep)
     app.router.add_post("/offer", offer)
     app.router.add_get("/", health)
 

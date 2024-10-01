@@ -17,6 +17,7 @@ from aiortc import (
 )
 from aiortc.rtcrtpsender import RTCRtpSender
 from aiortc.contrib.media import MediaRelay
+from aiohttp_middlewares import cors_middleware
 
 from lib.pipeline import StreamDiffusionPipeline
 from lib.tracks import VideoStreamTrack
@@ -434,7 +435,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=args.log_level.upper())
 
-    app = web.Application()
+    app = web.Application(middlewares=[cors_middleware(allow_all=True)])
     app["udp_ports"] = args.udp_ports.split(",")
     app["model_id"] = args.model_id
 

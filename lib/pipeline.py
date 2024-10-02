@@ -23,7 +23,7 @@ class StreamDiffusionPipeline:
             device=self.device,
             dtype=torch.float16,
             t_index_list=self.t_index_list,
-            frame_buffer_size=1,
+            frame_buffer_size=2,
             use_lcm_lora=True,
             output_type="pt",
             mode="img2img",

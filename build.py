@@ -20,7 +20,7 @@ def build():
         device="cuda",
         dtype=torch.float16,
         t_index_list=DEFAULT_T_INDEX_LIST,
-        frame_buffer_size=1,
+        frame_buffer_size=2,
         lora_dict=lora_dict,
         use_lcm_lora=True,
         output_type="pt",

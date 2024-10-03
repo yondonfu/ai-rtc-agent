@@ -60,10 +60,10 @@ class StreamDiffusionPipeline:
             raise Exception("invalid frame type")
 
         if isinstance(frame, av.VideoFrame):
-            frame = frame.to_ndarray(format="bgr24")
-            frame = frame.astype(np.float32) / 255.0
-            frame = frame.transpose(2, 0, 1)
-            return torch.from_numpy(frame).to("cuda")
+            frame = frame.to_ndarray(format="rgb24")
+            frame = cvcuda.as_tensor(
+                torch.from_numpy(frame).unsqueeze(0).to(self.device), "NHWC"
+            )
 
         # dtype=uint8 -> dtype=float32
         frame = cvcuda.convertto(frame, np.float32, scale=1 / 255)
@@ -82,13 +82,13 @@ class StreamDiffusionPipeline:
         return (frame * 255.0).clamp(0, 255).to(dtype=torch.uint8).unsqueeze(0)
 
     def __call__(
-        self, frame: torch.Tensor | av.VideoFrame, output_type="pt"
+        self, frame: torch.Tensor | av.VideoFrame
     ) -> torch.Tensor | av.VideoFrame:
         pre_output = self.preprocess(frame)
         pred_output = self.predict(pre_output)
         post_output = self.postprocess(pred_output)
 
-        if output_type == "av":
+        if not os.getenv("NVENC"):
             output = post_output.cpu().permute(0, 2, 3, 1).squeeze(0).numpy()
             output = av.VideoFrame.from_ndarray(output)
 

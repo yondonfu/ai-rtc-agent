@@ -9,6 +9,6 @@ av
 aiohttp
 twilio
 PyNvVideoCodec
-git+https://github.com/yondonfu/aiortc.git@1aa5def2640442d5d8519aee32faa92b310d09b7
+git+https://github.com/yondonfu/aiortc.git@f2332244ee9a41e3e0f9d63896abb25cc5d1531b
 git+https://github.com/yondonfu/StreamDiffusion.git@deepstream#egg=streamdiffusion[tensorrt]
 cvcuda_cu12-0.11.0b0-cp310-cp310-linux_x86_64.whl

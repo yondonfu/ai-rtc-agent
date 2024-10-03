@@ -2,6 +2,8 @@ import torch
 import cvcuda
 import numpy as np
 import os
+import nvcv
+import av
 
 from typing import List
 from lib.wrapper import StreamDiffusionWrapper
@@ -53,7 +55,16 @@ class StreamDiffusionPipeline:
             guidance_scale=DEFAULT_GUIDANCE_SCALE,
         )
 
-    def preprocess(self, frame: torch.Tensor):
+    def preprocess(self, frame: nvcv.Tensor | av.VideoFrame):
+        if not isinstance(frame, nvcv.Tensor) and not isinstance(frame, av.VideoFrame):
+            raise Exception("invalid frame type")
+
+        if isinstance(frame, av.VideoFrame):
+            frame = frame.to_ndarray(format="bgr24")
+            frame = frame.astype(np.float32) / 255.0
+            frame = frame.transpose(2, 0, 1)
+            return torch.from_numpy(frame).to("cuda")
+
         # dtype=uint8 -> dtype=float32
         frame = cvcuda.convertto(frame, np.float32, scale=1 / 255)
         # NHWC -> NCHW
@@ -70,9 +81,24 @@ class StreamDiffusionPipeline:
         # dtype=float16 -> dtype=uint8
         return (frame * 255.0).clamp(0, 255).to(dtype=torch.uint8).unsqueeze(0)
 
-    def __call__(self, frame: torch.Tensor):
-        frame = self.preprocess(frame)
-        frame = self.predict(frame)
-        frame = self.postprocess(frame)
+    def __call__(
+        self, frame: torch.Tensor | av.VideoFrame, output_type="pt"
+    ) -> torch.Tensor | av.VideoFrame:
+        output = self.preprocess(frame)
+        output = self.predict(output)
+        output = self.postprocess(output)
 
-        return frame
+        if output_type == "av":
+            output = output.cpu().permute(0, 2, 3, 1).squeeze(0).numpy()
+            output = av.VideoFrame.from_ndarray(output)
+
+            # At the moment, we require that if the requested output type is av.VideoFrame then
+            # the input type is also av.VideoFrame
+            assert isinstance(frame, av.VideoFrame)
+
+            output.pts = frame.pts
+            output.time_base = frame.time_base
+
+            return output
+
+        return output

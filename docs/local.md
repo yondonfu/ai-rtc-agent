@@ -59,5 +59,9 @@ The default directory for engine plan files is `./models/engines` and can be mod
 The following will start a publicly accessible server listening on port 8888 (default).
 
 ```
+# Enable NVENC
+export NVENC=true
+# Enable NVDEC
+export NVDEC=true
 python agent.py
 ```

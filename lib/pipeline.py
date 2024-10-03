@@ -84,12 +84,12 @@ class StreamDiffusionPipeline:
     def __call__(
         self, frame: torch.Tensor | av.VideoFrame, output_type="pt"
     ) -> torch.Tensor | av.VideoFrame:
-        output = self.preprocess(frame)
-        output = self.predict(output)
-        output = self.postprocess(output)
+        pre_output = self.preprocess(frame)
+        pred_output = self.predict(pre_output)
+        post_output = self.postprocess(pred_output)
 
         if output_type == "av":
-            output = output.cpu().permute(0, 2, 3, 1).squeeze(0).numpy()
+            output = post_output.cpu().permute(0, 2, 3, 1).squeeze(0).numpy()
             output = av.VideoFrame.from_ndarray(output)
 
             # At the moment, we require that if the requested output type is av.VideoFrame then
@@ -101,4 +101,4 @@ class StreamDiffusionPipeline:
 
             return output
 
-        return output
+        return post_output

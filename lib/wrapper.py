@@ -237,6 +237,7 @@ class StreamDiffusionWrapper:
         self,
         image: Optional[Union[str, Image.Image, torch.Tensor]] = None,
         prompt: Optional[str] = None,
+        t_index_list: Optional[List[int]] = None,
     ) -> Union[Image.Image, List[Image.Image]]:
         """
         Performs img2img or txt2img based on the mode.
@@ -254,12 +255,12 @@ class StreamDiffusionWrapper:
             The generated image.
         """
         if self.mode == "img2img":
-            return self.img2img(image, prompt)
+            return self.img2img(image, prompt, t_index_list)
         else:
-            return self.txt2img(prompt)
+            return self.txt2img(prompt, t_index_list)
 
     def txt2img(
-        self, prompt: Optional[str] = None
+        self, prompt: Optional[str] = None, t_index_list: Optional[List[int]] = None
     ) -> Union[Image.Image, List[Image.Image], torch.Tensor, np.ndarray]:
         """
         Performs txt2img.
@@ -276,6 +277,9 @@ class StreamDiffusionWrapper:
         """
         if prompt is not None:
             self.stream.update_prompt(prompt)
+
+        if t_index_list is not None:
+            self.update_t_index_list(t_index_list)
 
         if self.sd_turbo:
             image_tensor = self.stream.txt2img_sd_turbo(self.batch_size)
@@ -296,7 +300,10 @@ class StreamDiffusionWrapper:
         return image
 
     def img2img(
-        self, image: Union[str, Image.Image, torch.Tensor], prompt: Optional[str] = None
+        self,
+        image: Union[str, Image.Image, torch.Tensor],
+        prompt: Optional[str] = None,
+        t_index_list: Optional[List[int]] = None,
     ) -> Union[Image.Image, List[Image.Image], torch.Tensor, np.ndarray]:
         """
         Performs img2img.
@@ -313,6 +320,9 @@ class StreamDiffusionWrapper:
         """
         if prompt is not None:
             self.stream.update_prompt(prompt)
+
+        if t_index_list is not None:
+            self.update_t_index_list(t_index_list)
 
         if isinstance(image, str) or isinstance(image, Image.Image):
             image = self.preprocess_image(image)
@@ -375,6 +385,26 @@ class StreamDiffusionWrapper:
             return postprocess_image(image_tensor, output_type=output_type)
         else:
             return postprocess_image(image_tensor, output_type=output_type)[0]
+
+    def update_t_index_list(self, t_index_list: List[int]):
+        if t_index_list == self.stream.t_list:
+            return
+
+        self.stream.t_list = t_index_list
+        self.stream.sub_timesteps = []
+        for t in t_index_list:
+            self.stream.sub_timesteps.append(self.stream.timesteps[t])
+
+        sub_timesteps_tensor = torch.tensor(
+            self.stream.sub_timesteps, dtype=torch.long, device=self.device
+        )
+        self.stream.sub_timesteps_tensor = torch.repeat_interleave(
+            sub_timesteps_tensor,
+            repeats=self.stream.frame_bff_size
+            if self.stream.use_denoising_batch
+            else 1,
+            dim=0,
+        )
 
     def _load_trt_model(
         self,

@@ -45,15 +45,7 @@ class StreamDiffusionPipeline:
         self.prompt = prompt
 
     def update_t_index_list(self, t_index_list: List[int]):
-        if t_index_list == self.model.stream.t_list:
-            return
-
-        self.model.prepare(
-            prompt=self.prompt,
-            t_index_list=t_index_list,
-            num_inference_steps=DEFAULT_NUM_INFERENCE_STEPS,
-            guidance_scale=DEFAULT_GUIDANCE_SCALE,
-        )
+        self.t_index_list = t_index_list
 
     def preprocess(self, frame: nvcv.Tensor | av.VideoFrame):
         if not isinstance(frame, nvcv.Tensor) and not isinstance(frame, av.VideoFrame):
@@ -75,7 +67,9 @@ class StreamDiffusionPipeline:
         return frame
 
     def predict(self, frame: torch.Tensor):
-        return self.model(image=frame, prompt=self.prompt)
+        return self.model(
+            image=frame, prompt=self.prompt, t_index_list=self.t_index_list
+        )
 
     def postprocess(self, frame: torch.Tensor):
         # dtype=float16 -> dtype=uint8

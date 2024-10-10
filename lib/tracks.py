@@ -15,7 +15,7 @@ class VideoStreamTrack(MediaStreamTrack):
         self.pipeline = pipeline
         self.warmup_frame_idx = 0
         self.warmup_frames = os.getenv("WARMUP_FRAMES", 10)
-        self.drop_frames = int(os.getenv("DROP_FRAMES", 1))
+        self.drop_frames = int(os.getenv("DROP_FRAMES", 0))
 
     async def recv(self):
         while self.warmup_frame_idx < self.warmup_frames:

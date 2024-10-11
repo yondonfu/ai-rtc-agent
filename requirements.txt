@@ -7,6 +7,7 @@ nvtx
 pandas
 av
 aiohttp
+aiohttp_middlewares
 twilio
 PyNvVideoCodec
 git+https://github.com/yondonfu/aiortc.git@f2332244ee9a41e3e0f9d63896abb25cc5d1531b

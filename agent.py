@@ -208,7 +208,10 @@ async def whep(request):
     if request.content_type != "application/sdp":
         return web.Response(status=400)
 
-    source_track = request.app["state"]["source_track"]
+    source_track = request.app["state"].get("source_track", None)
+    if source_track is None:
+        return web.Response(status=401)
+
     pcs = request.app["pcs"]
 
     offer = await request.text()

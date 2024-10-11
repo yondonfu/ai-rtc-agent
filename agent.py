@@ -388,36 +388,6 @@ async def whip(request):
     )
 
 
-# websocket would be preferrable but the client in TouchDesigner is not working right now
-# async def update_config(request):
-#     pipeline = request.app["pipeline"]
-
-#     ws = web.WebSocketResponse()
-#     await ws.prepare(request)
-
-#     async for msg in ws:
-#         if msg.type == WSMsgType.TEXT:
-#             if msg.data == "close":
-#                 await ws.close()
-#             else:
-#                 config = json.loads(msg.data)
-#                 logger.info(f"received config: {config}")
-
-#                 t_index_list = config.get("t_index_list", None)
-#                 if t_index_list is not None:
-#                     pipeline.update_t_index_list(t_index_list)
-
-#                 prompt = config.get("prompt", None)
-#                 if prompt is not None:
-#                     pipeline.update_prompt(prompt)
-#         elif msg.type == WSMsgType.ERROR:
-#             print("ws connection closed with exception %s" % ws.exception())
-
-#     print("ws connection closed")
-
-#     return ws
-
-
 async def update_config(request):
     config = await request.json()
     logger.info(f"received config: {config}")

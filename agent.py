@@ -202,6 +202,9 @@ async def offer(request):
 
 
 async def whep(request):
+    if request.method == "DELETE":
+        return web.Response(status=200)
+
     if request.content_type != "application/sdp":
         return web.Response(status=400)
 
@@ -269,14 +272,10 @@ async def whep(request):
     )
 
 
-# TODO: After the peer disconnects we see this error sometimes
-# https://github.com/aiortc/aiortc/issues/1124
-async def stop_whep(request):
-    # TODO: Close pc
-    return web.Response(status=200)
-
-
 async def whip(request):
+    if request.method == "DELETE":
+        return web.Response(status=200)
+
     if request.content_type != "application/sdp":
         return web.Response(status=400)
 
@@ -386,11 +385,6 @@ async def whip(request):
     )
 
 
-async def stop_whip(request):
-    # TODO: Close pc
-    return web.Response(status=200)
-
-
 # websocket would be preferrable but the client in TouchDesigner is not working right now
 # async def update_config(request):
 #     pipeline = request.app["pipeline"]
@@ -490,9 +484,9 @@ if __name__ == "__main__":
     app.on_shutdown.append(on_shutdown)
 
     app.router.add_post("/whip", whip)
-    app.router.add_delete("/whip", stop_whip)
+    app.router.add_delete("/whip", whip)
     app.router.add_post("/whep", whep)
-    app.router.add_delete("/whep", stop_whep)
+    app.router.add_delete("/whep", whep)
     app.router.add_post("/offer", offer)
     app.router.add_post("/config", update_config)
     app.router.add_get("/", health)

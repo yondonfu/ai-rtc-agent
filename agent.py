@@ -12,6 +12,7 @@ from twilio.rest import Client
 from aiohttp import web
 from aiortc import (
     RTCPeerConnection,
+    RTCConfiguration,
     RTCSessionDescription,
     RTCIceServer,
 )
@@ -132,8 +133,14 @@ async def offer(request):
     offer_params = params["offer"]
     offer = RTCSessionDescription(sdp=offer_params["sdp"], type=offer_params["type"])
 
-    # pc = RTCPeerConnection(configuration=RTCConfiguration(iceServers=get_ice_servers()))
-    pc = RTCPeerConnection()
+    ice_servers = get_ice_servers()
+    if len(ice_servers) > 0:
+        pc = RTCPeerConnection(
+            configuration=RTCConfiguration(iceServers=get_ice_servers())
+        )
+    else:
+        pc = RTCPeerConnection()
+
     pcs.add(pc)
 
     tracks = {"video": None}
@@ -450,7 +457,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=args.log_level.upper())
 
     app = web.Application(middlewares=[cors_middleware(allow_all=True)])
-    app["udp_ports"] = args.udp_ports.split(",")
+    app["udp_ports"] = args.udp_ports.split(",") if args.udp_ports else None
     app["model_id"] = args.model_id
 
     app.on_startup.append(on_startup)
